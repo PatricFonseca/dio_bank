@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 # from .models import Cliente, Conta, Conta_Corrente, Endereco, Historico, Usuario, only_digits
+import functools
 import re
 import datetime
 
@@ -18,6 +19,18 @@ class Endereco:
 
 def only_digits(cpf):
     return re.sub(r'[^0-9]', '', cpf)
+
+
+def log(funcao):
+    @functools.wraps(funcao)
+    def wrapper(*args, **kwargs):
+        funcao(*args, **kwargs)
+        print("==============================")
+        print(datetime.datetime.now())
+        print(f"Transação: {funcao.__name__}")
+        print("==============================")
+
+    return wrapper
 
 
 class Cliente:
@@ -55,21 +68,25 @@ class Conta:
     def saldo(self):
         return self._saldo
 
+    @log
     @classmethod
     def nova_conta(cls, cliente, numero):
         return cls(0, numero, cliente, Historico())
 
+    @log
     def sacar(self, valor) -> bool:
         if valor > self._saldo:
             print("Saldo insuficiente!")
             return False
         else:
-            self.historico.adicionar_trancacao(Saque(valor))
+            self.historico.adicionar_transacao(Saque(valor))
             self._saldo -= valor
             return True
 
+    @log
     def depositar(self, valor) -> bool:
         self._saldo += valor
+        self.historico.adicionar_transacao(Deposito(valor))
         return True
 
     def __str__(self):
@@ -111,7 +128,7 @@ class Deposito(Transacao):
 
     def registrar(self, conta):
         if conta.depositar(self._valor):
-            conta.historico.adicionar_trancacao(Deposito(self._valor))
+            conta.historico.adicionar_transacao(Deposito(self._valor))
 
 
 class Saque(Transacao):
@@ -120,20 +137,26 @@ class Saque(Transacao):
 
     def registrar(self, conta):
         if conta.sacar(self._valor):
-            conta.historico.adicionar_trancacao(Saque(self._valor))
+            conta.historico.adicionar_transacao(Saque(self._valor))
 
 
 class Historico:
     def __init__(self):
         self._transacoes = []
 
-    def adicionar_trancacao(self, transacao):
+    @log
+    def adicionar_transacao(self, transacao):
         # extrato = f"{transacao.__class__.__name__}: R$ {transacao.valor:.2f}"
         self._transacoes.append({
             'tipo': transacao.__class__.__name__,
             'valor': transacao.valor,
             'data': datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
         })
+
+    def gerar_relatorio(self, tipo_transacao=None):
+        for transacao in self._transacoes:
+            if tipo_transacao is None or transacao['tipo'].lower() == tipo_transacao.lower():
+                yield transacao
 
     def __str__(self):
         return "\n".join([f"Transação {i+1}:\n" + "\n".join([f"  {key} - {value}" for key, value in transaction.items()]) for i, transaction in enumerate(self._transacoes)])
@@ -147,11 +170,15 @@ menu = """
 [nc] Nova Conta
 [lc] Lista contas
 [nu] Novo usuário
+[rel] Relatório
 [q] Sair
 
 => """
 
-clientes: list[Cliente] = []
+clientes: list[Cliente] = [
+    Pessoa_Fisica('João', '01/01/2000', '123',
+                  Endereco('Rua 1', 'Bairro 1', 'Cidade 1', 'UF 1', 'CEP 1')),
+]
 contas: list[Conta] = []
 
 
@@ -202,6 +229,7 @@ def sacar():
     transacao.registrar(conta)
 
 
+@log
 def cadastrar_novo_usuario():
     print("Cadastrando novo usuário...")
 
@@ -224,6 +252,7 @@ def cadastrar_novo_usuario():
     clientes.append(novo_cliente)
 
 
+@log
 def cadastrar_nova_conta():
     print("Cadastrando nova conta...")
 
@@ -294,5 +323,22 @@ while True:
         for conta in contas:
             print('------------------------------')
             print(conta)
+
+    elif opcao == "rel":
+        usuario = encontrar_usuario(input("CPF: "))
+
+        if not usuario:
+            print("CPF inválido, por favor tente novamente.")
+            continue
+
+        conta = buscar_conta(cpf=usuario.cpf)
+
+        if not conta:
+            print("Conta inválida, por favor tente novamente.")
+            continue
+
+        for transacao in conta.historico.gerar_relatorio():
+            print(
+                f'''{transacao['data']}\n{transacao['tipo']}\n \tR$ {transacao['valor']:.2f}''')
     else:
         print("Operação inválida, por favor selecione novamente a operação desejada.")
